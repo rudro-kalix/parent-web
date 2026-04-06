@@ -6,6 +6,16 @@ import {
   signInWithPopup,
   signOut
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import {
+  addDoc,
+  collection,
+  getDocs,
+  getFirestore,
+  limit,
+  orderBy,
+  query,
+  serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyD-bFyWmwOP_sWi7NxGPRwyOyKj4bv-6qw",
@@ -16,10 +26,11 @@ const firebaseConfig = {
   appId: "1:690640400418:web:f0bbb5a2b779d320669a7b"
 };
 
-const functionBaseUrl = "https://us-central1-parent-ba408.cloudfunctions.net";
+const approvedAdminEmails = new Set(["252-35-584@diu.edu.bd"]);
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
 
 const signInBtn = document.getElementById("signInBtn");
@@ -35,19 +46,13 @@ const commandInput = document.getElementById("command");
 const argsInput = document.getElementById("args");
 const selectedDeviceHint = document.getElementById("selectedDeviceHint");
 
-let idToken = null;
 let devices = [];
 let selectedDeviceId = "";
+let currentUser = null;
 
-const hasPlaceholderConfig =
-  Object.values(firebaseConfig).some((value) => String(value).includes("REPLACE_ME")) ||
-  functionBaseUrl.includes("REPLACE_ME");
-
-if (hasPlaceholderConfig) {
-  configStatus.classList.remove("hidden");
-  configStatus.textContent =
-    "Replace the Firebase web config and Cloud Functions URL in web-dashboard/app.js before signing in.";
-}
+configStatus.classList.remove("hidden");
+configStatus.textContent =
+  "Spark-compatible mode: dashboard uses Firebase Auth + Cloud Firestore directly. Cloud Functions are not required.";
 
 signInBtn.addEventListener("click", async () => {
   await signInWithPopup(auth, provider);
@@ -61,6 +66,11 @@ refreshBtn.addEventListener("click", loadDevices);
 
 commandForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+
+  if (!currentUser || !isApprovedAdmin(currentUser)) {
+    setCommandResult("Sign in with the approved admin account first.");
+    return;
+  }
 
   const deviceId = deviceIdInput.value.trim();
   const command = commandInput.value.trim();
@@ -80,9 +90,12 @@ commandForm.addEventListener("submit", async (event) => {
 
   try {
     setCommandResult("Queueing command...");
-    const result = await authedFetch("sendCommand", {
-      method: "POST",
-      body: JSON.stringify({ deviceId, command, args })
+    const result = await addDoc(collection(db, "devices", deviceId, "commands"), {
+      command,
+      args,
+      status: "queued",
+      createdBy: currentUser.uid,
+      createdAt: serverTimestamp()
     });
 
     selectedDeviceId = deviceId;
@@ -93,7 +106,7 @@ commandForm.addEventListener("submit", async (event) => {
         {
           deviceId,
           command,
-          commandId: result.commandId
+          commandId: result.id
         },
         null,
         2
@@ -105,8 +118,9 @@ commandForm.addEventListener("submit", async (event) => {
 });
 
 onAuthStateChanged(auth, async (user) => {
+  currentUser = user;
+
   if (!user) {
-    idToken = null;
     devices = [];
     selectedDeviceId = "";
     signInBtn.classList.remove("hidden");
@@ -115,7 +129,7 @@ onAuthStateChanged(auth, async (user) => {
     renderStats([]);
     renderDevices([]);
     setSelectedDeviceHint("");
-    setCommandResult("Sign in with an admin account to send commands.");
+    setCommandResult("Sign in with the approved admin account to send commands.");
     return;
   }
 
@@ -123,69 +137,51 @@ onAuthStateChanged(auth, async (user) => {
   signOutBtn.classList.remove("hidden");
   refreshBtn.disabled = true;
 
-  const hasAccess = await ensureAdminSession(user);
-  if (!hasAccess) {
-    return;
-  }
-
-  refreshBtn.disabled = false;
-  await loadDevices();
-});
-
-async function ensureAdminSession(user) {
-  try {
-    idToken = await user.getIdToken(true);
-    await authedFetch("ensureAdminAccess", { method: "POST" });
-    idToken = await waitForAdminToken(user);
-    setCommandResult(`Signed in as ${user.email}. Admin access is ready.`);
-    return true;
-  } catch (error) {
+  if (!isApprovedAdmin(user)) {
     devices = [];
     selectedDeviceId = "";
     renderStats([]);
     renderDevices([]);
     setSelectedDeviceHint("");
-    devicesOutput.innerHTML = `<div class="empty-state">Access error: ${error.message}</div>`;
+    devicesOutput.innerHTML =
+      '<div class="empty-state">This signed-in account is not approved for dashboard access.</div>';
     setCommandResult(
-      `Signed in as ${user.email}, but dashboard admin access is not available.\n\n${error.message}`
+      `Signed in as ${user.email}, but only approved admin emails can use this dashboard.`
     );
-    return false;
-  }
-}
-
-async function authedFetch(path, options = {}) {
-  if (!idToken) {
-    throw new Error("You must sign in first.");
+    return;
   }
 
-  const response = await fetch(`${functionBaseUrl}/${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${idToken}`,
-      ...(options.headers || {})
-    }
-  });
-
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error || `HTTP ${response.status}`);
-  }
-
-  return data;
-}
+  setCommandResult(`Signed in as ${user.email}. Firestore access is ready.`);
+  refreshBtn.disabled = false;
+  await loadDevices();
+});
 
 async function loadDevices() {
+  if (!currentUser || !isApprovedAdmin(currentUser)) {
+    devicesOutput.innerHTML =
+      '<div class="empty-state">Sign in with the approved admin account to load devices.</div>';
+    return;
+  }
+
   try {
     devicesOutput.innerHTML = '<div class="empty-state">Loading devices...</div>';
-    const data = await authedFetch("getOverview", { method: "GET" });
-    devices = Array.isArray(data.devices) ? data.devices : [];
+    const devicesQuery = query(collection(db, "devices"), orderBy("updatedAt", "desc"), limit(50));
+    const snapshot = await getDocs(devicesQuery);
+    devices = snapshot.docs.map((docSnapshot) => ({
+      id: docSnapshot.id,
+      ...docSnapshot.data()
+    }));
     renderStats(devices);
     renderDevices(devices);
   } catch (error) {
     renderStats([]);
     devicesOutput.innerHTML = `<div class="empty-state">Error: ${error.message}</div>`;
   }
+}
+
+function isApprovedAdmin(user) {
+  const email = String(user.email || "").trim().toLowerCase();
+  return user.emailVerified && approvedAdminEmails.has(email);
 }
 
 function renderStats(deviceList) {
@@ -226,7 +222,7 @@ function renderDevices(deviceList) {
   if (!deviceList.length) {
     const emptyState = document.createElement("div");
     emptyState.className = "empty-state";
-    emptyState.textContent = idToken
+    emptyState.textContent = currentUser
       ? "No devices have reported in yet."
       : "Sign in to view device activity.";
     devicesOutput.append(emptyState);
@@ -358,36 +354,4 @@ function getTimestampMs(timestamp) {
   }
 
   return null;
-}
-
-function delay(milliseconds) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, milliseconds);
-  });
-}
-
-async function waitForAdminToken(user) {
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    await delay(600 * (attempt + 1));
-    const token = await user.getIdToken(true);
-    if (tokenHasAdminClaim(token)) {
-      return token;
-    }
-  }
-
-  throw new Error("Admin claim was not ready after sign-in. Please sign in again.");
-}
-
-function tokenHasAdminClaim(token) {
-  const parts = token.split(".");
-  if (parts.length < 2) {
-    return false;
-  }
-
-  try {
-    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
-    return payload.admin === true;
-  } catch {
-    return false;
-  }
 }
