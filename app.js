@@ -8,13 +8,15 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 
 const firebaseConfig = {
-  apiKey: "REPLACE_ME",
-  authDomain: "REPLACE_ME.firebaseapp.com",
-  projectId: "REPLACE_ME",
-  appId: "REPLACE_ME"
+  apiKey: "AIzaSyD-bFyWmwOP_sWi7NxGPRwyOyKj4bv-6qw",
+  authDomain: "parent-ba408.firebaseapp.com",
+  projectId: "parent-ba408",
+  storageBucket: "parent-ba408.firebasestorage.app",
+  messagingSenderId: "690640400418",
+  appId: "1:690640400418:web:f0bbb5a2b779d320669a7b"
 };
 
-const functionBaseUrl = "https://us-central1-REPLACE_ME.cloudfunctions.net";
+const functionBaseUrl = "https://us-central1-parent-ba408.cloudfunctions.net";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
