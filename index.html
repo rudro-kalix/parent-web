@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Parent Control Dashboard</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Guardian Console</p>
+          <h1>Parent Control Dashboard</h1>
+          <p class="hero-copy">
+            Review connected devices, inspect their latest sync activity, and send parent-issued
+            commands through Firebase.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="signInBtn">Sign in with Google</button>
+          <button id="signOutBtn" class="hidden">Sign out</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">Device Fleet</p>
+              <h2>Overview</h2>
+            </div>
+            <button id="refreshBtn">Refresh devices</button>
+          </div>
+
+          <p id="configStatus" class="config-note hidden"></p>
+          <div id="deviceStats" class="stats-grid"></div>
+          <div id="devicesOutput" class="device-list" aria-live="polite"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">Parent Action</p>
+              <h2>Send command</h2>
+            </div>
+          </div>
+
+          <p id="selectedDeviceHint" class="muted">
+            Select a device card or enter a device ID manually.
+          </p>
+
+          <form id="commandForm" class="command-form">
+            <label>
+              Device ID
+              <input id="deviceId" required placeholder="child-phone-01" />
+            </label>
+
+            <label>
+              Command
+              <input id="command" required placeholder="lock_app" />
+            </label>
+
+            <label>
+              Args (JSON)
+              <textarea id="args" rows="8">{"package":"com.example.app"}</textarea>
+            </label>
+
+            <button type="submit">Queue command</button>
+          </form>
+
+          <pre id="commandResult" class="result-box">No command sent yet.</pre>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
