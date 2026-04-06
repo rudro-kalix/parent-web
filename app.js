@@ -119,12 +119,39 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
 
-  idToken = await user.getIdToken(true);
   signInBtn.classList.add("hidden");
   signOutBtn.classList.remove("hidden");
+  refreshBtn.disabled = true;
+
+  const hasAccess = await ensureAdminSession(user);
+  if (!hasAccess) {
+    return;
+  }
+
   refreshBtn.disabled = false;
   await loadDevices();
 });
+
+async function ensureAdminSession(user) {
+  try {
+    idToken = await user.getIdToken(true);
+    await authedFetch("ensureAdminAccess", { method: "POST" });
+    idToken = await waitForAdminToken(user);
+    setCommandResult(`Signed in as ${user.email}. Admin access is ready.`);
+    return true;
+  } catch (error) {
+    devices = [];
+    selectedDeviceId = "";
+    renderStats([]);
+    renderDevices([]);
+    setSelectedDeviceHint("");
+    devicesOutput.innerHTML = `<div class="empty-state">Access error: ${error.message}</div>`;
+    setCommandResult(
+      `Signed in as ${user.email}, but dashboard admin access is not available.\n\n${error.message}`
+    );
+    return false;
+  }
+}
 
 async function authedFetch(path, options = {}) {
   if (!idToken) {
@@ -331,4 +358,36 @@ function getTimestampMs(timestamp) {
   }
 
   return null;
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
+}
+
+async function waitForAdminToken(user) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await delay(600 * (attempt + 1));
+    const token = await user.getIdToken(true);
+    if (tokenHasAdminClaim(token)) {
+      return token;
+    }
+  }
+
+  throw new Error("Admin claim was not ready after sign-in. Please sign in again.");
+}
+
+function tokenHasAdminClaim(token) {
+  const parts = token.split(".");
+  if (parts.length < 2) {
+    return false;
+  }
+
+  try {
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return payload.admin === true;
+  } catch {
+    return false;
+  }
 }
